@@ -3,12 +3,26 @@
 import os
 import time
 import numpy as np
+import httpx
 from google import genai
 from google.genai import types
 
 import sys
 sys.path.insert(0, ".")
 from config import GOOGLE_API_KEY, MODEL_NAME, RATE_LIMIT_DELAY, MAX_RETRIES
+
+# Monkey-patch httpx to force proxy usage, since google-genai SDK ignores proxy env vars
+_httpx_original_init = httpx.Client.__init__
+
+def _httpx_patched_init(self, *args, **kwargs):
+    if "proxy" not in kwargs:
+        proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY") \
+            or os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
+        if proxy:
+            kwargs["proxy"] = proxy
+    _httpx_original_init(self, *args, **kwargs)
+
+httpx.Client.__init__ = _httpx_patched_init
 
 
 class GeminiEmbeddingClient:
@@ -22,11 +36,6 @@ class GeminiEmbeddingClient:
                 "GOOGLE_API_KEY not set. Export it as an environment variable: "
                 "export GOOGLE_API_KEY='your-key'"
             )
-        # Ensure uppercase proxy env vars are set so httpx (used internally by SDK) picks them up
-        for lower, upper in [("http_proxy", "HTTP_PROXY"), ("https_proxy", "HTTPS_PROXY")]:
-            val = os.environ.get(lower) or os.environ.get(upper)
-            if val:
-                os.environ[upper] = val
         self.client = genai.Client(api_key=self.api_key)
         self._last_call_time = 0
 
