@@ -15,8 +15,24 @@ This project tests whether typographic attacks — adding misleading text overla
 
 ## Setup
 
+### 1. Install dependencies
+
 ```bash
 pip install -r requirements.txt
+```
+
+### 2. Get a Google API Key
+
+This project uses the Gemini Embedding 2 API. You need a free API key from Google AI Studio:
+
+1. Go to [Google AI Studio - API Keys](https://aistudio.google.com/apikey)
+2. Sign in with your Google account
+3. Click **"Create API Key"** and select or create a Google Cloud project
+4. Copy the generated key (starts with `AIza...`)
+
+### 3. Set the API Key
+
+```bash
 export GOOGLE_API_KEY="your-api-key-here"
 ```
 
