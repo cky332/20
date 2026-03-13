@@ -1,7 +1,9 @@
 """Gemini Embedding 2 API client wrapper."""
 
+import os
 import time
 import numpy as np
+import httpx
 from google import genai
 from google.genai import types
 
@@ -21,7 +23,12 @@ class GeminiEmbeddingClient:
                 "GOOGLE_API_KEY not set. Export it as an environment variable: "
                 "export GOOGLE_API_KEY='your-key'"
             )
-        self.client = genai.Client(api_key=self.api_key)
+        proxy_url = os.environ.get("https_proxy") or os.environ.get("http_proxy")
+        if proxy_url:
+            http_client = httpx.Client(proxy=proxy_url)
+            self.client = genai.Client(api_key=self.api_key, http_options={"client": http_client})
+        else:
+            self.client = genai.Client(api_key=self.api_key)
         self._last_call_time = 0
 
     def _rate_limit(self):
