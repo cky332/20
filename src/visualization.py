@@ -295,6 +295,122 @@ def plot_transfer_matrix(row_labels, col_labels, values,
     plt.close()
 
 
+def plot_target_vs_random_shift(results, title="Target vs Random Text Shift",
+                                save_path=None):
+    """Plot target shift vs random shift side-by-side for each pair.
+
+    Args:
+        results: List of dicts with 'label', 'target_shift', 'random_shift'.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    labels = [r["label"] for r in results]
+    target_shifts = [r["target_shift"] for r in results]
+    random_shifts = [r["random_shift"] for r in results]
+
+    x = np.arange(len(labels))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(max(12, len(labels) * 0.5), 6))
+    ax.bar(x - width / 2, target_shifts, width, label="Target Text Shift",
+           color="#D6604D", alpha=0.8)
+    ax.bar(x + width / 2, random_shifts, width, label="Random Text Shift",
+           color="#4393C3", alpha=0.8)
+
+    ax.set_xlabel("Image-Target Pair")
+    ax.set_ylabel("Similarity Shift")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=90, ha="center", fontsize=6)
+    ax.legend()
+    ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+    ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
+def plot_mismatch_heatmap(matrix, source_labels, target_labels,
+                           title="Mismatch Analysis: Shift per Target",
+                           save_path=None):
+    """Plot heatmap showing shift of each attacked image toward all targets.
+
+    Args:
+        matrix: 2D numpy array of shape (n_attacked, n_targets) with shift values.
+        source_labels: Row labels (attacked image descriptions).
+        target_labels: Column labels (target texts).
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    matrix = np.array(matrix)
+    fig, ax = plt.subplots(figsize=(max(8, len(target_labels) * 1.2),
+                                    max(6, len(source_labels) * 0.4)))
+
+    cmap = LinearSegmentedColormap.from_list("shift", ["#2166AC", "#F7F7F7", "#B2182B"])
+    vmax = max(abs(matrix.min()), abs(matrix.max()))
+    im = ax.imshow(matrix, cmap=cmap, vmin=-vmax, vmax=vmax, aspect="auto")
+
+    ax.set_xticks(range(len(target_labels)))
+    ax.set_yticks(range(len(source_labels)))
+    ax.set_xticklabels(target_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(source_labels, fontsize=7)
+
+    for i in range(len(source_labels)):
+        for j in range(len(target_labels)):
+            ax.text(j, i, f"{matrix[i, j]:+.3f}", ha="center", va="center",
+                    fontsize=6, color="black" if abs(matrix[i, j]) < vmax * 0.6 else "white")
+
+    plt.colorbar(im, ax=ax, shrink=0.8, label="Similarity Shift")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_xlabel("Measured Against Target Text")
+    ax.set_ylabel("Attacked Image (overlaid text)")
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
+def plot_shift_by_target_boxplot(results_by_target, title="Shift Distribution by Target",
+                                  save_path=None):
+    """Plot boxplot of shifts grouped by target text.
+
+    Args:
+        results_by_target: Dict mapping target_text -> list of shifts.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    labels = list(results_by_target.keys())
+    data = [results_by_target[l] for l in labels]
+
+    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.2), 6))
+    bp = ax.boxplot(data, labels=labels, patch_artist=True)
+
+    for patch in bp["boxes"]:
+        patch.set_facecolor("#D6604D")
+        patch.set_alpha(0.6)
+
+    ax.set_xlabel("Target Text")
+    ax.set_ylabel("Similarity Shift")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+    ax.grid(axis="y", alpha=0.3)
+    plt.xticks(rotation=30, ha="right")
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
 def plot_retrieval_ranking(rankings_before, rankings_after,
                             poisoned_doc_id, title="Retrieval Ranking Change",
                             save_path=None):
