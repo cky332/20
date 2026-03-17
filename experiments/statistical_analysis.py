@@ -66,6 +66,41 @@ def analyze_exp1(data):
           f"significant={ttest['significant']}")
     print(f"  Cohen's d={d:.3f}")
 
+    # Enhanced analysis with control group (if available)
+    has_controls = all("random_shift" in r for r in results)
+    if has_controls:
+        random_shifts = [r["random_shift"] for r in results]
+        advantages = [r["targeted_advantage"] for r in results]
+
+        ttest_vs_random = paired_ttest(random_shifts, shifts)
+        d_vs_random = compute_cohens_d(random_shifts, shifts)
+        advantage_ci = compute_confidence_interval(advantages)
+
+        analysis["control_group"] = {
+            "ttest_target_vs_random": ttest_vs_random,
+            "cohens_d_vs_random": d_vs_random,
+            "targeted_advantage_ci": advantage_ci,
+            "mean_random_shift": float(sum(random_shifts) / len(random_shifts)),
+        }
+
+        print(f"\n  [Control group analysis]")
+        print(f"  Mean random shift: {analysis['control_group']['mean_random_shift']:+.4f}")
+        print(f"  Mean targeted advantage: {advantage_ci['mean']:+.4f} "
+              f"[{advantage_ci['lower']:+.4f}, {advantage_ci['upper']:+.4f}]")
+        print(f"  Target vs Random t={ttest_vs_random['t_statistic']:.3f}, "
+              f"p={ttest_vs_random['p_value']:.6f}")
+        print(f"  Cohen's d (vs random): {d_vs_random:.3f}")
+
+    # Mismatch analysis (if available)
+    summary = data.get("summary", {})
+    mismatch = summary.get("mismatch_analysis")
+    if mismatch:
+        analysis["mismatch_analysis"] = mismatch
+        print(f"\n  [Mismatch analysis]")
+        print(f"  Matched shift:    {mismatch['matched_mean_shift']:+.4f}")
+        print(f"  Mismatched shift: {mismatch['mismatched_mean_shift']:+.4f}")
+        print(f"  Semantic specificity: {mismatch['semantic_specificity_confirmed']}")
+
     return analysis
 
 
