@@ -287,9 +287,19 @@ def run_experiment():
             "clean": clean_max_sims,
         },
     }
+    def _json_default(obj):
+        """Handle numpy types for JSON serialization."""
+        if hasattr(obj, "item"):
+            return obj.item()
+        if isinstance(obj, bool):
+            return bool(obj)
+        if hasattr(obj, "tolist"):
+            return obj.tolist()
+        return str(obj)
+
     output_path = os.path.join(RESULTS_DATA_DIR, "exp5_results.json")
     with open(output_path, "w") as f:
-        json.dump(output, f, indent=2)
+        json.dump(output, f, indent=2, default=_json_default)
     print(f"\nResults saved to: {output_path}")
 
     # ===== Plots =====

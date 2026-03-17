@@ -12,7 +12,7 @@ OUTPUT_DIMS = [768, 1536, 3072]
 
 RATE_LIMIT_DELAY = 1.0
 
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 RESULTS_DATA_DIR = os.path.join(RESULTS_DIR, "data")

@@ -25,13 +25,17 @@ from src.statistics import (
 
 
 def _load_json(filename):
-    """Load a JSON results file, return None if not found."""
+    """Load a JSON results file, return None if not found or corrupted."""
     path = os.path.join(RESULTS_DATA_DIR, filename)
     if not os.path.exists(path):
         print(f"  Warning: {filename} not found, skipping.")
         return None
-    with open(path) as f:
-        return json.load(f)
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        print(f"  Warning: {filename} is corrupted (incomplete write?), skipping.")
+        return None
 
 
 def analyze_exp1(data):
