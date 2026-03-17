@@ -177,6 +177,124 @@ def plot_embedding_space_2d(embeddings_dict, labels_groups=None,
     plt.close()
 
 
+def plot_hubness_distribution(hubness_counts, adversarial_ids=None,
+                               title="Hubness Distribution (N_k)",
+                               save_path=None):
+    """Plot hubness distribution as a bar chart.
+
+    Args:
+        hubness_counts: Dict mapping item_id -> N_k count.
+        adversarial_ids: Set of item IDs to highlight in red.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    adversarial_ids = adversarial_ids or set()
+    items = sorted(hubness_counts.items(), key=lambda x: x[1], reverse=True)
+    labels = [item[0] for item in items]
+    counts = [item[1] for item in items]
+    colors = ["#D6604D" if l in adversarial_ids else "#4393C3" for l in labels]
+
+    fig, ax = plt.subplots(figsize=(max(10, len(labels) * 0.8), 6))
+    ax.bar(range(len(labels)), counts, color=colors, alpha=0.8)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("N_k (Hubness Score)")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.grid(axis="y", alpha=0.3)
+
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#D6604D", label="Adversarial"),
+        Patch(facecolor="#4393C3", label="Clean"),
+    ]
+    ax.legend(handles=legend_elements)
+
+    plt.tight_layout()
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
+def plot_collision_progression(pairs_data, title="Semantic Collision Progression",
+                                save_path=None):
+    """Plot similarity progression as attack intensity increases.
+
+    Args:
+        pairs_data: List of dicts with 'pair_label' and 'similarities'
+            (list of (intensity_label, similarity) tuples).
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = plt.cm.Set2(np.linspace(0, 1, len(pairs_data)))
+
+    for i, pair in enumerate(pairs_data):
+        intensities = [s[0] for s in pair["similarities"]]
+        sims = [s[1] for s in pair["similarities"]]
+        ax.plot(range(len(intensities)), sims, "o-", color=colors[i],
+                label=pair["pair_label"], linewidth=2, markersize=8)
+
+    ax.set_xticks(range(len(pairs_data[0]["similarities"])))
+    ax.set_xticklabels(
+        [s[0] for s in pairs_data[0]["similarities"]],
+        rotation=30, ha="right", fontsize=9,
+    )
+    ax.set_xlabel("Attack Intensity")
+    ax.set_ylabel("Cosine Similarity to Target Text")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.legend(fontsize=8, loc="upper left")
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
+def plot_transfer_matrix(row_labels, col_labels, values,
+                          title="Cross-Modal Transfer Matrix",
+                          save_path=None):
+    """Plot a heatmap of transfer effectiveness across modality directions.
+
+    Args:
+        row_labels: List of row labels (source directions).
+        col_labels: List of column labels (target directions).
+        values: 2D list of transfer scores.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    matrix = np.array(values)
+    fig, ax = plt.subplots(figsize=(max(8, len(col_labels)), max(6, len(row_labels) * 0.8)))
+
+    cmap = LinearSegmentedColormap.from_list("transfer", ["#F7F7F7", "#D6604D"])
+    im = ax.imshow(matrix, cmap=cmap, aspect="auto", vmin=0)
+
+    ax.set_xticks(range(len(col_labels)))
+    ax.set_yticks(range(len(row_labels)))
+    ax.set_xticklabels(col_labels, rotation=45, ha="right", fontsize=9)
+    ax.set_yticklabels(row_labels, fontsize=9)
+
+    for i in range(len(row_labels)):
+        for j in range(len(col_labels)):
+            ax.text(j, i, f"{matrix[i, j]:.3f}", ha="center", va="center",
+                    fontsize=9, color="black" if matrix[i, j] < 0.5 else "white")
+
+    plt.colorbar(im, ax=ax, shrink=0.8, label="Similarity Shift")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
 def plot_retrieval_ranking(rankings_before, rankings_after,
                             poisoned_doc_id, title="Retrieval Ranking Change",
                             save_path=None):

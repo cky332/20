@@ -27,6 +27,10 @@ def main():
         2: ("Cross-Modal Alignment Attack", "experiments.exp2_cross_modal"),
         3: ("Document Retrieval Poisoning", "experiments.exp3_retrieval_poison"),
         4: ("Parameter Sensitivity Study", "experiments.exp4_parameter_study"),
+        5: ("Adversarial Hubness Attack", "experiments.exp5_adversarial_hubness"),
+        6: ("Cross-Modal Transfer Attack", "experiments.exp6_cross_modal_transfer"),
+        7: ("Semantic Collision Attack", "experiments.exp7_semantic_collision"),
+        8: ("Statistical Analysis", "experiments.statistical_analysis"),
     }
 
     results_summary = {}

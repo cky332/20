@@ -5,9 +5,9 @@
 
 ## 摘要 / Abstract
 
-本研究首次对 Google Gemini Embedding 2——首个原生多模态 embedding 模型——进行了系统性的 typographic 攻击评估。Gemini Embedding 2 将文本、图像、视频、音频和文档统一映射到单一向量空间，与传统 CLIP 式双编码器（dual-encoder）架构在根本上不同。我们设计了四组黑盒实验（black-box experiments），仅通过 API 查询、无需梯度访问，测试了 typographic 文本叠加（text overlay）对图像 embedding 的操控能力，包括：(1) 基础 typographic 攻击，(2) 跨模态对齐攻击（cross-modal alignment attack），(3) 文档检索投毒（document retrieval poisoning），以及 (4) 攻击参数敏感度分析（parameter sensitivity study）。实验结果为理解原生多模态架构与双编码器架构在对抗鲁棒性上的差异提供了首批实证数据。
+本研究首次对 Google Gemini Embedding 2——首个原生多模态 embedding 模型——进行了系统性的对抗鲁棒性评估。Gemini Embedding 2 将文本、图像、视频、音频和文档统一映射到单一 3,072 维向量空间，与传统 CLIP 式双编码器（dual-encoder）架构在根本上不同。我们设计了七组黑盒实验（black-box experiments），仅通过 API 查询、无需梯度访问，测试了多种攻击方法的有效性，包括：(1) 基础 typographic 攻击，(2) 跨模态对齐攻击，(3) 文档检索投毒，(4) 攻击参数敏感度分析，(5) **对抗性 Hubness 攻击**（首次将 hubness 现象的对抗性利用引入多模态 embedding 评估），(6) 跨模态迁移攻击，以及 (7) 语义碰撞攻击。所有实验均配备配对 t 检验、置信区间和 Cohen's d 效应量等统计分析。实验结果为理解原生多模态架构与双编码器架构在对抗鲁棒性上的差异提供了首批实证数据。
 
-This study presents the first systematic evaluation of typographic attacks against Google's Gemini Embedding 2 — the first natively multimodal embedding model. Unlike CLIP-style dual-encoder architectures, Gemini Embedding 2 maps text, images, video, audio, and documents into a unified embedding space using a single Transformer. We design four black-box experiments requiring only API access (no gradient information): (1) basic typographic attacks, (2) cross-modal alignment attacks, (3) document retrieval poisoning, and (4) attack parameter sensitivity analysis. Our results provide the first empirical evidence on the adversarial robustness differences between native multimodal and dual-encoder architectures.
+This study presents the first systematic adversarial robustness evaluation of Google's Gemini Embedding 2 — the first natively multimodal embedding model. Unlike CLIP-style dual-encoder architectures, Gemini Embedding 2 maps text, images, video, audio, and documents into a unified 3,072-dimensional embedding space using a single Transformer. We design seven black-box experiments requiring only API access (no gradient information): (1) basic typographic attacks, (2) cross-modal alignment attacks, (3) document retrieval poisoning, (4) parameter sensitivity analysis, (5) **adversarial hubness attacks** (the first application of hubness exploitation to multimodal embedding evaluation), (6) cross-modal transfer attacks, and (7) semantic collision attacks. All experiments include paired t-tests, confidence intervals, and Cohen's d effect sizes. Our results provide the first empirical evidence on the adversarial robustness differences between native multimodal and dual-encoder architectures.
 
 ---
 
@@ -30,10 +30,12 @@ Typographic 攻击（typographic attack）是指在图像中嵌入误导性文�
 ### 1.3 贡献 / Contributions
 
 1. **首次实证评估**：对 Gemini Embedding 2 进行了首次系统性的 typographic 攻击评估
-2. **全面的实验设计**：四组实验覆盖了基础攻击、跨模态对齐、检索投毒和参数敏感度
-3. **架构对比视角**：从原生多模态 vs 双编码器的架构差异角度分析了对抗鲁棒性
-4. **黑盒方法论**：所有实验均为纯 API 调用的黑盒攻击，反映了实际威胁场景
-5. **开源代码框架**：提供了可复现的实验代码，可扩展到其他多模态 embedding 模型
+2. **全面的实验设计**：七组实验覆盖了基础攻击、跨模态对齐、检索投毒、参数敏感度、**对抗性 Hubness**、跨模态迁移和语义碰撞
+3. **Adversarial Hubness 首次应用**：首次将 hubness 现象的对抗性利用引入多模态 embedding 模型评估
+4. **架构对比视角**：从原生多模态 vs 双编码器的架构差异角度分析了对抗鲁棒性
+5. **统计严谨性**：所有实验配备配对 t 检验、置信区间、Cohen's d 和随机基线对照
+6. **黑盒方法论**：所有实验均为纯 API 调用的黑盒攻击，反映了实际威胁场景
+7. **开源代码框架**：提供了可复现的实验代码，可扩展到其他多模态 embedding 模型
 
 ---
 
@@ -70,7 +72,17 @@ CLIP 在进行零样本分类（zero-shot classification）时，倾向于优先
 
 - 研究者通过 API 查询成功蒸馏（distill）了 OpenAI 和 Cohere 的商用 embedding 模型，窃取后的模型可用于设计对抗样本并迁移回原始模型。这意味着即使 Gemini Embedding 2 是闭源的，也可以通过 surrogate model 策略发起攻击。
 
-### 2.6 现有工作的局限与本研究的定位 / Gap Analysis
+### 2.6 高维空间中的 Hubness 现象与对抗性利用 / Adversarial Hubness in High-Dimensional Spaces
+
+在高维空间中，"hubness"现象指某些点会成为不成比例的大量其他点的最近邻（Radovanovic et al., 2010）。这一现象随维度增加而加剧，是高维空间的固有属性。
+
+- **Radovanovic et al. (2010)** 首次系统研究了高维空间中的 hub 现象，发现少数 hub 点出现在大量查询的 k 近邻列表中，而 anti-hub 点几乎从未被检索到。
+- **Dinu et al. (2015)** 发现 hubness 现象严重影响了跨语言 embedding 空间的映射质量。
+- **对抗性利用**：如果攻击者能故意构造出成为 hub 的 embedding 向量，那么一个对抗样本就可以"劫持"大量不相关查询的检索结果——这对 RAG 系统构成严重威胁。Gemini Embedding 2 的 3,072 维空间足以使 hubness 现象显著。
+
+本研究首次将 adversarial hubness 的概念应用于对多模态 embedding 模型的攻击评估。
+
+### 2.7 现有工作的局限与本研究的定位 / Gap Analysis
 
 | 维度 | 现有工作 | 本研究 |
 |------|---------|--------|
@@ -131,6 +143,32 @@ CLIP 在进行零样本分类（zero-shot classification）时，倾向于优先
 - **重复次数**：1x ~ 5x
 - **背景框**：有/无
 
+#### 3.2.5 对抗性 Hubness 攻击 / Adversarial Hubness Attack
+
+利用高维空间的 hubness 现象，构造能成为大量不相关查询最近邻的对抗图像：
+- 定义涵盖 15+ 个不相关领域的查询集合
+- 构建干净图像语料库作为基线
+- 使用三种策略构造对抗 hub 图像：
+  1. **关键词汤（Keyword Soup）**：在图像上叠加涵盖所有领域的长关键词串
+  2. **多位置关键词（Multi-Position）**：在不同位置放置不同领域的关键词
+  3. **密集重复（Dense Repetition）**：高频查询词大字号分散重复
+- 测量 $N_k$ hubness 得分并与随机文本基线对比
+
+#### 3.2.6 跨模态迁移攻击 / Cross-Modal Transfer Attack
+
+测试为一个检索方向设计的攻击是否能迁移到其他方向：
+- **Image→Text**（原始攻击方向）：攻击图像与目标文本的相似度变化
+- **Text→Image**（反向检索）：用目标文本查询图像语料库时的排名变化
+- **Attacked Image→Text**（反向查询）：用攻击图像查询文本语料库
+- **Multimodal→Image**：多模态联合查询的迁移效果
+
+#### 3.2.7 语义碰撞攻击 / Semantic Collision Attack
+
+测试能否使语义不同的输入产生近乎相同的 embedding：
+- 选择语义距离大的（图像，文本）对
+- 使用递进攻击强度（7 个级别：从无攻击到全文大字号分散重复）
+- 度量最大可达余弦相似度和碰撞差距（1.0 - max_similarity）
+
 ### 3.3 度量指标 / Metrics
 
 | 指标 | 定义 | 含义 |
@@ -139,6 +177,17 @@ CLIP 在进行零样本分类（zero-shot classification）时，倾向于优先
 | 相似度偏移（Similarity Shift） | $\Delta = \cos(e_{atk}, e_{target}) - \cos(e_{src}, e_{target})$ | 攻击造成的方向偏移量 |
 | 攻击成功率（Attack Success Rate, ASR） | $\frac{\text{count}(\Delta > \theta)}{N}$ | 攻击有效的比例（$\theta$ 为阈值） |
 | 语义保留度（Semantic Preservation） | $\cos(e_{src}, e_{atk})$ | 攻击后原始语义的保留程度 |
+| Hubness 得分（$N_k$） | 某项被多少查询视为 top-k 近邻 | 衡量对抗 hub 的影响范围 |
+| 碰撞差距（Collision Gap） | $1.0 - \max \cos(e_{atk}, e_{target})$ | 距完美碰撞的差距 |
+| 迁移率（Transfer Rate） | 在不同检索方向上攻击成功的比例 | 攻击的跨模态泛化能力 |
+
+### 3.4 统计方法 / Statistical Methods
+
+为保证实验结论的统计严谨性，我们采用以下方法：
+- **配对 t 检验（Paired t-test）**：检验 clean vs attacked 相似度差异的显著性（$p < 0.05$）
+- **95% 置信区间（Confidence Interval）**：报告 shift 均值的置信范围
+- **Cohen's d 效应量**：衡量攻击效果的实际大小（$|d| < 0.2$ 小, $0.5$ 中, $0.8$ 大）
+- **随机基线对照**：使用随机乱码文本叠加作为控制组，排除"任意文本叠加即有效"的假设
 
 ---
 
@@ -169,7 +218,11 @@ CLIP 在进行零样本分类（zero-shot classification）时，倾向于优先
 | Exp2 | ~24 | 4 对 × (clean + 3 强度 + 2 文本) |
 | Exp3 | ~12 | 5 文档 + 3 图像变体 + 查询 |
 | Exp4 | ~30 | 7+8+8+5+2 参数变体 |
-| **总计** | **~90** | |
+| Exp5 | ~40 | 15 查询 + 8 语料 + 3 对抗 hub + 3 随机基线 |
+| Exp6 | ~35 | 3 攻击案例 × (图像语料 + 文本语料 + 多模态查询) |
+| Exp7 | ~32 | 4 碰撞对 × 7 攻击强度级别 |
+| Exp8 | ~0 | 后验统计分析（读取已有结果） |
+| **总计** | **~197** | |
 
 ### 4.4 运行环境 / Environment
 
@@ -240,6 +293,58 @@ CLIP 在进行零样本分类（zero-shot classification）时，倾向于优先
 
 **结果文件**: `results/data/exp4_results.json`, `results/figures/exp4_*.png`
 
+### 5.5 实验5：对抗性 Hubness 攻击 / Exp5: Adversarial Hubness Attack
+
+**预期输出 / Expected Output**:
+- 基线与对抗条件下的 hubness 分布（$N_1$, $N_3$, $N_5$）柱状图
+- 查询-Hub 相似度热力图
+- 对抗 hub vs 随机基线的统计比较
+
+**关键观察维度 / Key Observations to Report**:
+1. 对抗 hub 图像的 $N_k$ 是否显著高于干净语料中的自然 hub
+2. 三种 hub 构造策略（关键词汤、多位置、密集重复）的效果差异
+3. 对抗 hub 是否能"俘获"跨领域的不相关查询
+4. 与随机文本基线的统计显著性差异
+
+**结果文件**: `results/data/exp5_results.json`, `results/figures/exp5_hubness_k1.png`, `results/figures/exp5_hubness_k3.png`
+
+### 5.6 实验6：跨模态迁移攻击 / Exp6: Cross-Modal Transfer Attack
+
+**预期输出 / Expected Output**:
+- 迁移效果矩阵热力图（攻击案例 × 检索方向）
+- 各方向的排名变化详情
+
+**关键观察维度 / Key Observations to Report**:
+1. 为 image→text 设计的攻击在 text→image 方向是否同样有效
+2. 多模态联合查询是否受到影响
+3. 反向查询（攻击图像作为 query）是否也产生偏移
+4. 统一 embedding 空间是否意味着攻击天然具有跨方向迁移性
+
+**结果文件**: `results/data/exp6_results.json`, `results/figures/exp6_transfer_matrix.png`
+
+### 5.7 实验7：语义碰撞攻击 / Exp7: Semantic Collision Attack
+
+**预期输出 / Expected Output**:
+- 各碰撞对随攻击强度递增的相似度变化折线图
+- 最大可达相似度和碰撞差距的统计汇总
+
+**关键观察维度 / Key Observations to Report**:
+1. 最大可达余弦相似度能否接近 1.0（完美碰撞）
+2. 攻击强度与相似度的关系是否单调递增
+3. 是否存在"饱和"效应（某个强度后不再增长）
+4. 不同碰撞对的碰撞难度是否一致
+
+**结果文件**: `results/data/exp7_results.json`, `results/figures/exp7_collision_progression.png`
+
+### 5.8 统计分析汇总 / Exp8: Statistical Analysis Summary
+
+**预期输出 / Expected Output**:
+- 各实验的配对 t 检验结果、Cohen's d 效应量
+- 95% 置信区间
+- 统计显著性汇总
+
+**结果文件**: `results/data/statistical_analysis.json`
+
 ---
 
 ## 6. 讨论 / Discussion
@@ -260,14 +365,29 @@ Gemini Embedding 2 与 CLIP 在架构上存在根本差异：
 
 **假设 2**：如果脆弱性**相当或更高**，可能是因为 Gemini 的多模态理解过于强大，反而更倾向于"阅读"图像中的文本内容。
 
-### 6.2 黑盒攻击的实际威胁 / Real-World Threat Assessment
+### 6.2 对抗性 Hubness 对 RAG 系统的威胁 / Adversarial Hubness Threat to RAG Systems
+
+对抗性 hubness 攻击对 RAG 系统构成独特的威胁：
+- 传统的投毒攻击（如 exp3）只能影响与特定查询相关的检索结果
+- 而 hub 攻击的一个对抗样本可以同时影响多个不相关领域的查询
+- 在大规模知识库中，即使只注入少量 hub 图像，也可能显著降低检索质量
+- 3,072 维的高维空间使得 hubness 现象更为严重
+
+### 6.3 跨模态迁移的安全启示 / Cross-Modal Transfer Security Implications
+
+如果攻击能从 image→text 方向迁移到 text→image 和 multimodal 方向：
+- 这意味着统一 embedding 空间虽然功能强大，但也使攻击面更大
+- 一次攻击可能同时影响所有使用该 embedding 的下游应用
+- 防御方需要在所有检索方向上都进行对抗鲁棒性测试
+
+### 6.4 黑盒攻击的实际威胁 / Real-World Threat Assessment
 
 本研究中的所有攻击均为黑盒方法，仅需 API 访问权限。这意味着：
 1. 任何可以调用 Gemini API 的用户都能发起类似攻击
 2. 攻击不需要了解模型内部结构
 3. 在 RAG 系统中，攻击者只需在知识库中注入一张图像即可影响检索结果
 
-### 6.3 局限性 / Limitations
+### 6.5 局限性 / Limitations
 
 1. **测试图像为程序化生成**：使用简单几何形状和场景，而非自然照片。真实照片上的攻击效果可能不同。
 2. **API 限制**：Gemini Embedding 2 仍为 Preview 版本，API 行为可能在正式发布时变化。
@@ -314,6 +434,8 @@ Gemini Embedding 2 与 CLIP 在架构上存在根本差异：
 13. Morris, J., et al. "Embedding Model Stealing via API Queries." 2024.
 14. Google. "Gemini Embedding 2: Our First Natively Multimodal Embedding Model." Google Blog, 2025.
 15. Google. "Embeddings — Gemini API Documentation." https://ai.google.dev/gemini-api/docs/embeddings
+16. Radovanovic, M., et al. "Hubs in Space: Popular Nearest Neighbors in High-Dimensional Data." JMLR 2010.
+17. Dinu, G., et al. "Improving Zero-Shot Learning by Mitigating the Hubness Problem." ICLR Workshop 2015.
 
 ---
 
@@ -326,14 +448,19 @@ Gemini Embedding 2 与 CLIP 在架构上存在根本差异：
 ├── src/
 │   ├── embedding_client.py            # Gemini API 封装
 │   ├── image_generator.py             # 测试图像生成
-│   ├── typographic_attack.py          # Typographic 攻击实现
+│   ├── typographic_attack.py          # Typographic 攻击实现 + 多文本叠加
 │   ├── similarity.py                  # 相似度计算
-│   └── visualization.py              # 可视化
+│   ├── statistics.py                  # 统计检验 & Hubness 指标
+│   └── visualization.py              # 可视化（含 hubness/碰撞/迁移图）
 ├── experiments/
-│   ├── exp1_typographic_basic.py      # 实验 1
-│   ├── exp2_cross_modal.py            # 实验 2
-│   ├── exp3_retrieval_poison.py       # 实验 3
-│   ├── exp4_parameter_study.py        # 实验 4
+│   ├── exp1_typographic_basic.py      # 实验 1：基础 Typographic 攻击
+│   ├── exp2_cross_modal.py            # 实验 2：跨模态对齐攻击
+│   ├── exp3_retrieval_poison.py       # 实验 3：文档检索投毒
+│   ├── exp4_parameter_study.py        # 实验 4：参数敏感度分析
+│   ├── exp5_adversarial_hubness.py    # 实验 5：对抗性 Hubness 攻击
+│   ├── exp6_cross_modal_transfer.py   # 实验 6：跨模态迁移攻击
+│   ├── exp7_semantic_collision.py     # 实验 7：语义碰撞攻击
+│   ├── statistical_analysis.py        # 实验 8：后验统计分析
 │   └── run_all.py                     # 统一运行
 └── results/                           # 实验输出
 ```

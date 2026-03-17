@@ -150,6 +150,48 @@ def generate_attack_variants(image_bytes, target_text):
     return variants
 
 
+def add_multi_text_overlay(image_bytes, text_position_pairs, font_size=36,
+                           color=(0, 0, 0)):
+    """Add multiple different text strings at specified positions on an image.
+
+    Useful for constructing adversarial hub images with keywords from
+    different domains placed at different locations.
+
+    Args:
+        image_bytes: Source image as bytes.
+        text_position_pairs: List of (text, position) tuples. Position is one of
+            'center', 'top', 'bottom', 'top-left', 'top-right',
+            'bottom-left', 'bottom-right'.
+        font_size: Font size in pixels.
+        color: RGB tuple for text color.
+
+    Returns:
+        Modified image as bytes.
+    """
+    img = _bytes_to_image(image_bytes).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    font = _get_font(font_size)
+    w, h = img.size
+
+    for text, position in text_position_pairs:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        positions = {
+            "center": ((w - tw) // 2, (h - th) // 2),
+            "top": ((w - tw) // 2, 10),
+            "bottom": ((w - tw) // 2, h - th - 10),
+            "top-left": (10, 10),
+            "top-right": (w - tw - 10, 10),
+            "bottom-left": (10, h - th - 10),
+            "bottom-right": (w - tw - 10, h - th - 10),
+        }
+        pos = positions.get(position, positions["center"])
+        draw.text(pos, text, fill=color, font=font)
+
+    return _image_to_bytes(img)
+
+
 def create_document_with_hidden_text(title, body_text, hidden_text,
                                       text_color=(250, 250, 250),
                                       size=(512, 512)):
