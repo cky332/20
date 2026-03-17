@@ -35,7 +35,7 @@ from src.statistics import (
     paired_ttest,
     compute_confidence_interval,
 )
-from src.visualization import plot_hubness_distribution, plot_similarity_heatmap
+from src.visualization import plot_hubness_distribution, plot_transfer_matrix
 
 
 # Diverse query set spanning unrelated domains
@@ -321,29 +321,24 @@ def run_experiment():
         save_path=os.path.join(RESULTS_FIGURES_DIR, "exp5_hubness_k3.png"),
     )
 
-    # Similarity heatmap: queries vs adversarial hubs
+    # Similarity heatmap: queries vs adversarial/random hubs
     all_items = dict(adversarial_hubs)
     all_items.update(random_hubs)
-    sim_labels = list(QUERY_SET.keys()) + list(all_items.keys())
-    sim_embeddings = {}
-    for qid, emb in query_embeddings.items():
-        sim_embeddings[qid] = emb
-    for iid, emb in all_items.items():
-        sim_embeddings[iid] = emb
+    hub_labels = list(all_items.keys())
+    query_labels = list(QUERY_SET.keys())
 
     sim_matrix = []
     for qid in QUERY_SET:
         row = []
-        for iid in all_items:
+        for iid in hub_labels:
             row.append(cosine_similarity(
                 query_embeddings[qid], all_items[iid]
             ))
         sim_matrix.append(row)
 
-    plot_similarity_heatmap(
-        sim_matrix,
-        labels=list(QUERY_SET.keys()),
-        title="Exp5: Query-Hub Similarity (Adversarial vs Random)",
+    plot_transfer_matrix(
+        query_labels, hub_labels, sim_matrix,
+        title="Exp5: Query-Hub Cosine Similarity (Adversarial vs Random)",
         save_path=os.path.join(RESULTS_FIGURES_DIR, "exp5_query_hub_heatmap.png"),
     )
 
