@@ -411,6 +411,78 @@ def plot_shift_by_target_boxplot(results_by_target, title="Shift Distribution by
     plt.close()
 
 
+def plot_ablation_comparison(variant_data, title="FigStep Ablation: Mean Similarity to Target",
+                            save_path=None):
+    """Plot mean similarity across ablation variants as a bar chart.
+
+    Args:
+        variant_data: List of dicts with 'variant_name' and 'mean_similarity'.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    names = [d["variant_name"] for d in variant_data]
+    sims = [d["mean_similarity"] for d in variant_data]
+
+    fig, ax = plt.subplots(figsize=(max(10, len(names) * 1.2), 6))
+    colors = plt.cm.Set2(np.linspace(0, 1, len(names)))
+    bars = ax.bar(range(len(names)), sims, color=colors, alpha=0.85, edgecolor="gray")
+
+    for bar, val in zip(bars, sims):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                f"{val:.3f}", ha="center", va="bottom", fontsize=8)
+
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names, rotation=35, ha="right", fontsize=9)
+    ax.set_ylabel("Mean Cosine Similarity to Target Text")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
+def plot_figstep_vs_simple_scatter(pairs, title="FigStep vs Simple Overlay Shift",
+                                   save_path=None):
+    """Scatter plot comparing FigStep shift vs simple overlay shift.
+
+    Points above the y=x line indicate FigStep is more effective.
+
+    Args:
+        pairs: List of dicts with 'label', 'simple_shift', 'figstep_shift'.
+        title: Plot title.
+        save_path: Path to save figure.
+    """
+    simple = [p["simple_shift"] for p in pairs]
+    figstep = [p["figstep_shift"] for p in pairs]
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(simple, figstep, c="#D6604D", s=60, alpha=0.7, edgecolors="gray", zorder=5)
+
+    # y=x reference line
+    lo = min(min(simple), min(figstep)) - 0.02
+    hi = max(max(simple), max(figstep)) + 0.02
+    ax.plot([lo, hi], [lo, hi], "k--", alpha=0.4, label="y = x")
+
+    ax.set_xlabel("Simple Overlay Shift")
+    ax.set_ylabel("FigStep Shift")
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    ax.set_aspect("equal", adjustable="datalim")
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_dir(os.path.dirname(save_path))
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.close()
+
+
 def plot_retrieval_ranking(rankings_before, rankings_after,
                             poisoned_doc_id, title="Retrieval Ranking Change",
                             save_path=None):
