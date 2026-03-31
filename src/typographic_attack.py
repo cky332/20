@@ -2,9 +2,13 @@
 
 Adds misleading text overlays to images to test whether Gemini Embedding 2
 shifts its embedding representation based on the overlaid text.
+
+Includes FigStep-style typographic image generation (Gong et al., AAAI 2025):
+renders paraphrased statements with numbered indices as standalone images.
 """
 
 import io
+import textwrap
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -243,3 +247,90 @@ def create_document_with_hidden_text(title, body_text, hidden_text,
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# FigStep-style typographic image generation (Gong et al., AAAI 2025)
+# ---------------------------------------------------------------------------
+
+def _get_freemono_font(size=50):
+    """Get FreeMono Bold font as used in FigStep paper, with fallback."""
+    try:
+        return ImageFont.truetype(
+            "/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf", size
+        )
+    except (OSError, IOError):
+        return _get_font(size)
+
+
+def paraphrase_to_figstep_statement(target_label, prefix="Steps to"):
+    """Convert a target label to a FigStep-format declarative statement.
+
+    Follows the FigStep paper's paraphrase step: transforms a topic into
+    a declarative statement beginning with "Steps to", "List of", or
+    "Methods to".
+
+    Args:
+        target_label: Target concept (e.g., "fire truck").
+        prefix: One of "Steps to", "List of", "Methods to".
+
+    Returns:
+        Paraphrased statement string.
+    """
+    prefix_templates = {
+        "Steps to": f"Steps to identify a {target_label}.",
+        "List of": f"List of features of a {target_label}.",
+        "Methods to": f"Methods to recognize a {target_label}.",
+    }
+    return prefix_templates.get(prefix, f"{prefix} {target_label}.")
+
+
+def create_figstep_image(statement, numbered_items=3, font_size=50,
+                         size=(512, 512), bg_color=(255, 255, 255),
+                         text_color=(0, 0, 0)):
+    """Create a FigStep-style typographic image.
+
+    Renders a paraphrased declarative statement followed by numbered
+    indices (e.g., "1.\\n2.\\n3.") on a solid background, mimicking the
+    FigStep paper's typography step.
+
+    Args:
+        statement: The paraphrased declarative statement text.
+        numbered_items: Number of numbered indices to append (default 3).
+        font_size: Font size in pixels (paper uses 80 at 760px; 50 at 512px).
+        size: Image dimensions (width, height).
+        bg_color: Background color RGB tuple.
+        text_color: Text color RGB tuple.
+
+    Returns:
+        Image bytes (PNG).
+    """
+    img = Image.new("RGB", size, bg_color)
+    draw = ImageDraw.Draw(img)
+    font = _get_freemono_font(font_size)
+    w, h = size
+    margin = 30
+
+    # Compute character width for wrapping
+    sample_bbox = draw.textbbox((0, 0), "M", font=font)
+    char_w = sample_bbox[2] - sample_bbox[0]
+    max_chars = max(1, (w - 2 * margin) // char_w)
+
+    # Wrap the statement text
+    wrapped_lines = textwrap.wrap(statement, width=max_chars)
+
+    # Add numbered indices
+    for i in range(1, numbered_items + 1):
+        wrapped_lines.append(f"{i}.")
+
+    # Draw lines
+    line_bbox = draw.textbbox((0, 0), "Mg", font=font)
+    line_height = (line_bbox[3] - line_bbox[1]) + 8
+    y = margin
+    for line in wrapped_lines:
+        if y + line_height > h - margin:
+            break
+        draw.text((margin, y), line, fill=text_color, font=font)
+        y += line_height
+
+    return _image_to_bytes(img)
