@@ -60,7 +60,7 @@ def paired_ttest(clean_sims, attacked_sims):
     return {
         "t_statistic": float(t_stat),
         "p_value": float(p_val),
-        "significant": p_val < 0.05,
+        "significant": bool(p_val < 0.05),
         "mean_diff": mean_diff,
         "direction": "attacked > clean" if mean_diff > 0 else "clean > attacked",
     }
