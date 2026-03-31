@@ -277,19 +277,19 @@ def run_experiment():
             "wilcoxon": {
                 "statistic": float(wilcoxon_stat),
                 "p_value": float(wilcoxon_p),
-                "significant": wilcoxon_p < 0.05,
+                "significant": bool(wilcoxon_p < 0.05),
             },
             "kruskal_wallis": {
                 "statistic": float(kw_stat),
                 "p_value": float(kw_p),
-                "significant": kw_p < 0.05,
+                "significant": bool(kw_p < 0.05),
             },
             "mismatch_analysis": {
                 "matched_mean_shift": float(np.mean(matched_shifts)),
                 "mismatched_mean_shift": float(np.mean(mismatched_shifts)),
                 "t_statistic": float(mismatch_ttest.statistic),
                 "p_value": float(mismatch_ttest.pvalue),
-                "semantic_specificity_confirmed": mismatch_ttest.pvalue < 0.05,
+                "semantic_specificity_confirmed": bool(mismatch_ttest.pvalue < 0.05),
             },
         },
         "mismatch_data": mismatch_data,
