@@ -11,7 +11,7 @@ import random
 import zipfile
 
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -351,7 +351,9 @@ def _get_coco_annotations(cache_dir):
 
     print("  Downloading COCO 2017 val annotations...")
     try:
-        resp = requests.get(COCO_VAL_ANNOTATIONS_URL, timeout=120, stream=True)
+        proxies = _get_proxy_dict()
+        resp = requests.get(COCO_VAL_ANNOTATIONS_URL, timeout=120,
+                            stream=True, proxies=proxies)
         resp.raise_for_status()
         zip_bytes = io.BytesIO(resp.content)
         with zipfile.ZipFile(zip_bytes) as zf:
@@ -369,10 +371,20 @@ def _get_coco_annotations(cache_dir):
         return None
 
 
+def _get_proxy_dict():
+    """Get proxy configuration from environment variables."""
+    proxy = (os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+             or os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY"))
+    if proxy:
+        return {"http": proxy, "https": proxy}
+    return None
+
+
 def _download_image(url, output_path, timeout=30):
     """Download a single image from URL."""
     try:
-        resp = requests.get(url, timeout=timeout)
+        proxies = _get_proxy_dict()
+        resp = requests.get(url, timeout=timeout, proxies=proxies)
         resp.raise_for_status()
         # Validate it's a real image
         img = Image.open(io.BytesIO(resp.content))
@@ -385,11 +397,76 @@ def _download_image(url, output_path, timeout=30):
         return False
 
 
+def _generate_synthetic_images(category, cat_dir, per_category, existing_count):
+    """Generate synthetic labeled images as last-resort fallback.
+
+    Creates simple images with the category name and colored backgrounds
+    to serve as placeholder images when network download fails.
+
+    Args:
+        category: Category name.
+        cat_dir: Output directory.
+        per_category: Target number of images.
+        existing_count: Number already present.
+    """
+    rng = random.Random(f"synthetic_{category}")
+    # Use varied backgrounds so images aren't identical
+    bg_palettes = [
+        (240, 248, 255), (255, 245, 238), (245, 255, 250), (255, 250, 240),
+        (248, 248, 255), (255, 228, 225), (240, 255, 240), (255, 255, 224),
+        (230, 230, 250), (255, 240, 245),
+    ]
+    generated = 0
+    for i in range(per_category - existing_count):
+        idx = existing_count + i + 1
+        bg_color = bg_palettes[i % len(bg_palettes)]
+        img = Image.new("RGB", IMAGE_SIZE, bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Draw a simple shape associated with the category
+        w, h = IMAGE_SIZE
+        shape_color = (rng.randint(60, 200), rng.randint(60, 200), rng.randint(60, 200))
+
+        # Draw an ellipse or rectangle as a placeholder object
+        margin = w // 4
+        if i % 2 == 0:
+            draw.ellipse([margin, margin, w - margin, h - margin],
+                         fill=shape_color, outline=(0, 0, 0), width=2)
+        else:
+            draw.rectangle([margin, margin, w - margin, h - margin],
+                           fill=shape_color, outline=(0, 0, 0), width=2)
+
+        # Add category label text
+        try:
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+        text = category.upper()
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text(((w - tw) // 2, h - th - 30), text, fill=(0, 0, 0), font=font)
+
+        # Apply slight blur to make it less "synthetic"
+        img = img.filter(ImageFilter.GaussianBlur(radius=1))
+
+        out_path = os.path.join(cat_dir, f"{idx:03d}.jpg")
+        img.save(out_path, "JPEG", quality=95)
+        generated += 1
+
+    print(f"  '{category}': generated {generated} synthetic images "
+          f"(total {existing_count + generated})")
+
+
 def _download_fallback_category(category, cat_dir, per_category, existing_count):
-    """Download images for a category using fallback URLs."""
+    """Download images for a category using fallback URLs.
+
+    Falls back to synthetic image generation if downloads fail.
+    """
     urls = FALLBACK_URLS.get(category, [])
     if not urls:
-        print(f"  WARNING: No fallback URLs for '{category}'")
+        print(f"  WARNING: No fallback URLs for '{category}', generating synthetic images")
+        _generate_synthetic_images(category, cat_dir, per_category, existing_count)
         return
 
     downloaded = existing_count
@@ -400,8 +477,14 @@ def _download_fallback_category(category, cat_dir, per_category, existing_count)
         if _download_image(url, out_path):
             downloaded += 1
 
-    print(f"  '{category}': downloaded {downloaded - existing_count} from fallback "
-          f"(total {downloaded})")
+    # If still not enough, generate synthetic images
+    if downloaded < per_category:
+        print(f"  '{category}': only downloaded {downloaded - existing_count} from fallback, "
+              f"generating {per_category - downloaded} synthetic images...")
+        _generate_synthetic_images(category, cat_dir, per_category, downloaded)
+    else:
+        print(f"  '{category}': downloaded {downloaded - existing_count} from fallback "
+              f"(total {downloaded})")
 
 
 def _download_fallback_all(output_dir, per_category):

@@ -11,18 +11,36 @@ import sys
 sys.path.insert(0, ".")
 from config import GOOGLE_API_KEY, MODEL_NAME, RATE_LIMIT_DELAY, MAX_RETRIES
 
-# Monkey-patch httpx to force proxy usage, since google-genai SDK ignores proxy env vars
-_httpx_original_init = httpx.Client.__init__
+# Monkey-patch httpx to force proxy usage, since google-genai SDK ignores proxy env vars.
+# This patches BOTH sync and async httpx clients.
+_httpx_sync_original_init = httpx.Client.__init__
+_httpx_async_original_init = httpx.AsyncClient.__init__
 
-def _httpx_patched_init(self, *args, **kwargs):
+
+def _get_proxy():
+    """Get proxy URL from environment variables."""
+    return (os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY"))
+
+
+def _httpx_sync_patched_init(self, *args, **kwargs):
     if "proxy" not in kwargs:
-        proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY") \
-            or os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
+        proxy = _get_proxy()
         if proxy:
             kwargs["proxy"] = proxy
-    _httpx_original_init(self, *args, **kwargs)
+    _httpx_sync_original_init(self, *args, **kwargs)
 
-httpx.Client.__init__ = _httpx_patched_init
+
+def _httpx_async_patched_init(self, *args, **kwargs):
+    if "proxy" not in kwargs:
+        proxy = _get_proxy()
+        if proxy:
+            kwargs["proxy"] = proxy
+    _httpx_async_original_init(self, *args, **kwargs)
+
+
+httpx.Client.__init__ = _httpx_sync_patched_init
+httpx.AsyncClient.__init__ = _httpx_async_patched_init
 
 
 class GeminiEmbeddingClient:
@@ -36,6 +54,14 @@ class GeminiEmbeddingClient:
                 "GOOGLE_API_KEY not set. Export it as an environment variable: "
                 "export GOOGLE_API_KEY='your-key'"
             )
+        proxy = _get_proxy()
+        if proxy:
+            print(f"  [EmbeddingClient] Using proxy: {proxy}")
+        else:
+            print("  [EmbeddingClient] WARNING: No proxy configured. "
+                  "If you cannot reach Google APIs directly, set environment variable:\n"
+                  "    export https_proxy=http://your-proxy:port\n"
+                  "    export http_proxy=http://your-proxy:port")
         self.client = genai.Client(api_key=self.api_key)
         self._last_call_time = 0
 
