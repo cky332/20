@@ -298,6 +298,9 @@ def phase2_prepare_dataset(force=False):
 def phase3_extract_embeddings(metadata, force=False):
     """Extract text and image embeddings via Gemini API.
 
+    Supports incremental progress: saves after every batch so that
+    quota-limited runs can resume where they left off.
+
     Text embeddings: 20 categories x 3 prompt templates = 60
     Attack word embeddings: up to 20 unique attack words x 1 template
     Image embeddings: all images from Phase 2
@@ -310,32 +313,57 @@ def phase3_extract_embeddings(metadata, force=False):
     print("=" * 60)
 
     cache_file = "exp1_phase3_embeddings.json"
+
+    # Load partial progress if available (resume support)
+    results = None
     if not force:
-        cached = _load_json(cache_file)
-        if cached:
-            print("  Phase 3 results loaded from cache.")
-            return cached
+        results = _load_json(cache_file)
+
+    if results is not None:
+        # Check if fully complete
+        total_images = len(metadata["images"])
+        done_images = len(results.get("image_embeddings", {}))
+        done_text = sum(len(v) for v in results.get("text_embeddings", {}).values())
+        done_atk = len(results.get("attack_text_embeddings", {}))
+
+        if done_text >= 60 and done_atk >= 1 and done_images >= total_images:
+            print(f"  Phase 3 fully complete ({done_images} image embeddings). "
+                  f"Loaded from cache.")
+            return results
+        else:
+            print(f"  Resuming Phase 3: text={done_text}/60, "
+                  f"attack_text={done_atk}, "
+                  f"images={done_images}/{total_images}")
+    else:
+        results = {
+            "text_embeddings": {},
+            "attack_text_embeddings": {},
+            "image_embeddings": {},
+        }
 
     client = GeminiEmbeddingClient()
-    results = {
-        "text_embeddings": {},    # {category: {template: embedding}}
-        "attack_text_embeddings": {},  # {attack_word: embedding}
-        "image_embeddings": {},   # {image_record_key: embedding}
-    }
+    save_interval = 20  # save progress every N image embeddings
 
     # Step 3.1: Text embeddings for each category x prompt template
-    print("\n--- Step 3.1: Text embeddings (20 categories x 3 templates) ---")
-    for i, category in enumerate(CATEGORIES):
-        prompts = get_text_prompts(category)
-        results["text_embeddings"][category] = {}
-        for tmpl_name, text in prompts.items():
+    existing_text = results["text_embeddings"]
+    remaining_text = [(cat, tmpl, txt)
+                      for cat in CATEGORIES
+                      for tmpl, txt in get_text_prompts(cat).items()
+                      if cat not in existing_text or tmpl not in existing_text.get(cat, {})]
+
+    if remaining_text:
+        print(f"\n--- Step 3.1: Text embeddings ({len(remaining_text)} remaining) ---")
+        for idx, (category, tmpl_name, text) in enumerate(remaining_text):
             emb = client.embed_text(text)
+            if category not in results["text_embeddings"]:
+                results["text_embeddings"][category] = {}
             results["text_embeddings"][category][tmpl_name] = emb.tolist()
-            print(f"  [{i * 3 + list(prompts.keys()).index(tmpl_name) + 1}/60] "
-                  f"Text: '{text}' -> dim={len(emb)}")
+            done = 60 - len(remaining_text) + idx + 1
+            print(f"  [{done}/60] Text: '{text}' -> dim={len(emb)}")
+    else:
+        print("\n--- Step 3.1: Text embeddings already complete (60/60) ---")
 
     # Attack word text embeddings (standard template)
-    print("\n--- Step 3.1b: Attack word text embeddings ---")
     pairings = metadata["pairings"]
     attack_words = set()
     for cat, pair in pairings.items():
@@ -343,15 +371,42 @@ def phase3_extract_embeddings(metadata, force=False):
             attack_words.add(pair[atk_type])
     attack_words = sorted(attack_words)
 
-    for i, word in enumerate(attack_words):
-        text = get_attack_text_prompt(word)
-        emb = client.embed_text(text)
-        results["attack_text_embeddings"][word] = emb.tolist()
-        print(f"  [{i + 1}/{len(attack_words)}] Attack text: '{text}'")
+    remaining_atk = [w for w in attack_words
+                     if w not in results["attack_text_embeddings"]]
+
+    if remaining_atk:
+        print(f"\n--- Step 3.1b: Attack word text embeddings ({len(remaining_atk)} remaining) ---")
+        for i, word in enumerate(remaining_atk):
+            text = get_attack_text_prompt(word)
+            emb = client.embed_text(text)
+            results["attack_text_embeddings"][word] = emb.tolist()
+            print(f"  [{len(attack_words) - len(remaining_atk) + i + 1}/{len(attack_words)}] "
+                  f"Attack text: '{text}'")
+    else:
+        print(f"\n--- Step 3.1b: Attack word embeddings already complete "
+              f"({len(attack_words)}/{len(attack_words)}) ---")
+
+    # Save text embeddings checkpoint
+    _save_json(results, cache_file)
 
     # Step 3.2: Image embeddings for all images
-    print(f"\n--- Step 3.2: Image embeddings ({len(metadata['images'])} images) ---")
+    total_images = len(metadata["images"])
+    existing_keys = set(results["image_embeddings"].keys())
+    skipped = 0
+    newly_embedded = 0
+
+    print(f"\n--- Step 3.2: Image embeddings "
+          f"({len(existing_keys)} done, "
+          f"{total_images - len(existing_keys)} remaining) ---")
+
     for i, record in enumerate(metadata["images"]):
+        key = f"{record['image_id']}_{record['group']}"
+
+        # Skip already-embedded images
+        if key in existing_keys:
+            skipped += 1
+            continue
+
         fpath = os.path.join(EXP1_DIR, record["filename"])
         if not os.path.exists(fpath):
             print(f"  WARNING: Image not found: {fpath}, skipping")
@@ -359,19 +414,30 @@ def phase3_extract_embeddings(metadata, force=False):
         with open(fpath, "rb") as f:
             img_bytes = f.read()
 
-        # Create a unique key for this image record
-        key = f"{record['image_id']}_{record['group']}"
         emb = client.embed_image(img_bytes, mime_type="image/jpeg")
         results["image_embeddings"][key] = emb.tolist()
+        newly_embedded += 1
 
-        if (i + 1) % 50 == 0 or i == 0:
-            print(f"  [{i + 1}/{len(metadata['images'])}] "
+        total_done = len(existing_keys) + newly_embedded
+        if newly_embedded % 10 == 0 or newly_embedded == 1:
+            print(f"  [{total_done}/{total_images}] "
                   f"{record['group']}: {record['image_id']}")
 
+        # Incremental save
+        if newly_embedded % save_interval == 0:
+            _save_json(results, cache_file)
+            print(f"  (checkpoint saved: {total_done}/{total_images})")
+
+    # Final save
+    total_done = len(results["image_embeddings"])
     print(f"\n  Embedding extraction complete:")
     print(f"    Text embeddings: {sum(len(v) for v in results['text_embeddings'].values())}")
     print(f"    Attack text embeddings: {len(results['attack_text_embeddings'])}")
-    print(f"    Image embeddings: {len(results['image_embeddings'])}")
+    print(f"    Image embeddings: {total_done}/{total_images}"
+          f" (skipped {skipped}, new {newly_embedded})")
+
+    _save_json(results, cache_file)
+    return results
 
     _save_json(results, cache_file)
     return results

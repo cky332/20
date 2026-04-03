@@ -75,6 +75,9 @@ class GeminiEmbeddingClient:
     def _call_with_retry(self, contents, output_dimensionality=None):
         """Call the embedding API with retry logic.
 
+        Handles rate limit (429) errors by waiting the suggested retry delay.
+        For quota exhaustion (daily limit), waits longer and retries.
+
         Args:
             contents: Content to embed.
             output_dimensionality: Optional output dimension (Matryoshka truncation).
@@ -85,7 +88,8 @@ class GeminiEmbeddingClient:
             config = types.EmbedContentConfig(
                 output_dimensionality=output_dimensionality
             )
-        for attempt in range(MAX_RETRIES):
+        max_attempts = MAX_RETRIES + 5  # extra attempts for quota errors
+        for attempt in range(max_attempts):
             try:
                 self._rate_limit()
                 result = self.client.models.embed_content(
@@ -95,10 +99,27 @@ class GeminiEmbeddingClient:
                 )
                 return np.array(result.embeddings[0].values)
             except Exception as e:
-                if attempt == MAX_RETRIES - 1:
+                err_str = str(e)
+                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+
+                if is_quota:
+                    # Extract retry delay from error if available
+                    import re
+                    delay_match = re.search(r'retry in ([\d.]+)s', err_str, re.IGNORECASE)
+                    if delay_match:
+                        wait_time = float(delay_match.group(1)) + 2.0
+                    else:
+                        # Exponential backoff: 15s, 30s, 60s, 120s, ...
+                        wait_time = min(15 * (2 ** attempt), 300)
+                    print(f"  Rate/quota limit hit (attempt {attempt + 1}/{max_attempts}). "
+                          f"Waiting {wait_time:.0f}s...")
+                    time.sleep(wait_time)
+                    continue
+
+                if attempt >= MAX_RETRIES - 1 and not is_quota:
                     raise
                 wait_time = 2 ** (attempt + 1)
-                print(f"  API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                print(f"  API call failed (attempt {attempt + 1}/{max_attempts}): {e}")
                 print(f"  Retrying in {wait_time}s...")
                 time.sleep(wait_time)
 
