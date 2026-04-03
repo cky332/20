@@ -352,7 +352,6 @@ def phase3_extract_embeddings(metadata, force=False):
     # Step 3.2: Image embeddings for all images
     print(f"\n--- Step 3.2: Image embeddings ({len(metadata['images'])} images) ---")
     for i, record in enumerate(metadata["images"]):
-        img_bytes = _load_image("", "")  # will construct path below
         fpath = os.path.join(EXP1_DIR, record["filename"])
         if not os.path.exists(fpath):
             print(f"  WARNING: Image not found: {fpath}, skipping")
