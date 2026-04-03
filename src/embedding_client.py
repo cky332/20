@@ -46,14 +46,26 @@ class GeminiEmbeddingClient:
             time.sleep(RATE_LIMIT_DELAY - elapsed)
         self._last_call_time = time.time()
 
-    def _call_with_retry(self, contents):
-        """Call the embedding API with retry logic."""
+    def _call_with_retry(self, contents, output_dimensionality=None):
+        """Call the embedding API with retry logic.
+
+        Args:
+            contents: Content to embed.
+            output_dimensionality: Optional output dimension (Matryoshka truncation).
+                Supported values: 3072 (default), 1536, 768.
+        """
+        config = None
+        if output_dimensionality is not None:
+            config = types.EmbedContentConfig(
+                output_dimensionality=output_dimensionality
+            )
         for attempt in range(MAX_RETRIES):
             try:
                 self._rate_limit()
                 result = self.client.models.embed_content(
                     model=self.model_name,
                     contents=contents,
+                    config=config,
                 )
                 return np.array(result.embeddings[0].values)
             except Exception as e:
@@ -64,23 +76,26 @@ class GeminiEmbeddingClient:
                 print(f"  Retrying in {wait_time}s...")
                 time.sleep(wait_time)
 
-    def embed_text(self, text: str) -> np.ndarray:
+    def embed_text(self, text: str, output_dimensionality=None) -> np.ndarray:
         """Get embedding for a text string.
 
         Args:
             text: Input text to embed.
+            output_dimensionality: Optional output dimension for Matryoshka truncation.
 
         Returns:
             Numpy array of embedding values.
         """
-        return self._call_with_retry([text])
+        return self._call_with_retry([text], output_dimensionality=output_dimensionality)
 
-    def embed_image(self, image_bytes: bytes, mime_type: str = "image/png") -> np.ndarray:
+    def embed_image(self, image_bytes: bytes, mime_type: str = "image/png",
+                    output_dimensionality=None) -> np.ndarray:
         """Get embedding for an image.
 
         Args:
             image_bytes: Raw image bytes.
             mime_type: MIME type of the image.
+            output_dimensionality: Optional output dimension for Matryoshka truncation.
 
         Returns:
             Numpy array of embedding values.
@@ -88,7 +103,7 @@ class GeminiEmbeddingClient:
         contents = [
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         ]
-        return self._call_with_retry(contents)
+        return self._call_with_retry(contents, output_dimensionality=output_dimensionality)
 
     def embed_multimodal(self, text: str, image_bytes: bytes,
                          mime_type: str = "image/png") -> np.ndarray:

@@ -18,5 +18,10 @@ RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 RESULTS_DATA_DIR = os.path.join(RESULTS_DIR, "data")
 RESULTS_FIGURES_DIR = os.path.join(RESULTS_DIR, "figures")
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+DATASET_DIR = os.path.join(ASSETS_DIR, "dataset")
+EXP1_DIR = os.path.join(ASSETS_DIR, "exp1")
 
 IMAGE_SIZE = (512, 512)
+
+COCO_VAL_ANNOTATIONS_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
+COCO_VAL_IMAGES_URL = "http://images.cocodataset.org/val2017"

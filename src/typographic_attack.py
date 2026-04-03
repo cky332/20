@@ -3,12 +3,19 @@
 Adds misleading text overlays to images to test whether Gemini Embedding 2
 shifts its embedding representation based on the overlaid text.
 
+Supports configurable opacity, text outlines, tiled text placement,
+dominant color extraction for low-contrast attacks, and font size
+as a percentage of image height.
+
 Includes FigStep-style typographic image generation (Gong et al., AAAI 2025):
 renders paraphrased statements with numbered indices as standalone images.
 """
 
 import io
 import textwrap
+from collections import Counter
+
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -33,69 +40,155 @@ def _image_to_bytes(img, fmt="PNG"):
     return buf.getvalue()
 
 
-def add_typographic_text(image_bytes, text, font_size=60, position="center",
-                         color=(0, 0, 0), bg_box=False, bg_box_color=(255, 255, 255),
-                         repeat=1):
+def get_dominant_color(image_bytes, n_colors=5):
+    """Extract the dominant color from an image using pixel sampling.
+
+    Downsamples the image and finds the most common color cluster.
+
+    Args:
+        image_bytes: Source image as bytes.
+        n_colors: Number of color buckets for quantization.
+
+    Returns:
+        RGB tuple of the dominant color.
+    """
+    img = _bytes_to_image(image_bytes).convert("RGB")
+    # Downsample for speed
+    img = img.resize((64, 64), Image.LANCZOS)
+    pixels = list(img.getdata())
+    # Quantize: round each channel to nearest bucket
+    bucket_size = 256 // n_colors
+    quantized = []
+    for r, g, b in pixels:
+        qr = (r // bucket_size) * bucket_size + bucket_size // 2
+        qg = (g // bucket_size) * bucket_size + bucket_size // 2
+        qb = (b // bucket_size) * bucket_size + bucket_size // 2
+        quantized.append((min(qr, 255), min(qg, 255), min(qb, 255)))
+    counter = Counter(quantized)
+    dominant = counter.most_common(1)[0][0]
+    return dominant
+
+
+def _draw_text_with_outline(draw, pos, text, font, fill, outline_color, outline_width):
+    """Draw text with an outline/stroke effect."""
+    x, y = pos
+    for dx in range(-outline_width, outline_width + 1):
+        for dy in range(-outline_width, outline_width + 1):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((x + dx, y + dy), text, fill=outline_color, font=font)
+    draw.text(pos, text, fill=fill, font=font)
+
+
+def add_typographic_text(image_bytes, text, font_size=60, font_size_pct=None,
+                         position="center", color=(0, 0, 0),
+                         bg_box=False, bg_box_color=(255, 255, 255),
+                         repeat=1, opacity=1.0,
+                         outline_color=None, outline_width=0):
     """Add typographic text overlay to an image.
 
     Args:
         image_bytes: Source image as bytes.
         text: Text to overlay.
-        font_size: Font size in pixels.
+        font_size: Font size in pixels (ignored if font_size_pct is set).
+        font_size_pct: Font size as fraction of image height (e.g., 0.10 = 10%).
         position: One of 'center', 'top', 'bottom', 'top-left', 'top-right',
-                  'bottom-left', 'bottom-right', 'scattered'.
+                  'bottom-left', 'bottom-right', 'top-center', 'bottom-center',
+                  'scattered', 'tiled'.
         color: RGB tuple for text color.
         bg_box: Whether to draw a background box behind text.
         bg_box_color: Background box color.
         repeat: Number of times to repeat the text.
+        opacity: Text opacity from 0.0 (transparent) to 1.0 (opaque).
+        outline_color: Optional RGB tuple for text outline/stroke.
+        outline_width: Width of text outline in pixels.
 
     Returns:
         Modified image as bytes.
     """
-    img = _bytes_to_image(image_bytes).convert("RGB")
-    draw = ImageDraw.Draw(img)
-    font = _get_font(font_size)
+    img = _bytes_to_image(image_bytes).convert("RGBA")
     w, h = img.size
+
+    # Compute font size from percentage if specified
+    if font_size_pct is not None:
+        font_size = max(8, int(h * font_size_pct))
+
+    font = _get_font(font_size)
+
+    # Create transparent overlay for opacity support
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    alpha = int(opacity * 255)
+    fill_color = (*color, alpha)
+    outline_fill = (*outline_color, alpha) if outline_color else None
 
     display_text = " ".join([text] * repeat) if repeat > 1 else text
     bbox = draw.textbbox((0, 0), display_text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tw, th_text = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    positions = {
-        "center": ((w - tw) // 2, (h - th) // 2),
-        "top": ((w - tw) // 2, 10),
-        "bottom": ((w - tw) // 2, h - th - 10),
-        "top-left": (10, 10),
-        "top-right": (w - tw - 10, 10),
-        "bottom-left": (10, h - th - 10),
-        "bottom-right": (w - tw - 10, h - th - 10),
-    }
-
-    if position == "scattered":
-        # Place text at multiple locations
+    if position == "tiled":
+        # Tile text across entire image
+        pad_x, pad_y = max(10, tw // 4), max(10, th_text // 2)
+        y_pos = 5
+        while y_pos < h:
+            x_pos = 5
+            while x_pos < w:
+                if outline_color and outline_width > 0:
+                    _draw_text_with_outline(draw, (x_pos, y_pos), text, font,
+                                            fill_color, outline_fill, outline_width)
+                else:
+                    draw.text((x_pos, y_pos), text, fill=fill_color, font=font)
+                x_pos += tw + pad_x
+            y_pos += th_text + pad_y
+    elif position == "scattered":
         locs = [
             (10, 10),
             (w - tw - 10, 10),
-            ((w - tw) // 2, (h - th) // 2),
-            (10, h - th - 10),
-            (w - tw - 10, h - th - 10),
+            ((w - tw) // 2, (h - th_text) // 2),
+            (10, h - th_text - 10),
+            (w - tw - 10, h - th_text - 10),
         ]
         for loc in locs:
             if bg_box:
+                box_fill = (*bg_box_color, alpha) if len(bg_box_color) == 3 else bg_box_color
                 draw.rectangle(
-                    [loc[0] - 2, loc[1] - 2, loc[0] + tw + 2, loc[1] + th + 2],
-                    fill=bg_box_color
+                    [loc[0] - 2, loc[1] - 2, loc[0] + tw + 2, loc[1] + th_text + 2],
+                    fill=box_fill
                 )
-            draw.text(loc, text, fill=color, font=font)
+            if outline_color and outline_width > 0:
+                _draw_text_with_outline(draw, loc, text, font,
+                                        fill_color, outline_fill, outline_width)
+            else:
+                draw.text(loc, text, fill=fill_color, font=font)
     else:
+        positions = {
+            "center": ((w - tw) // 2, (h - th_text) // 2),
+            "top": ((w - tw) // 2, 10),
+            "bottom": ((w - tw) // 2, h - th_text - 10),
+            "top-left": (10, 10),
+            "top-right": (w - tw - 10, 10),
+            "bottom-left": (10, h - th_text - 10),
+            "bottom-right": (w - tw - 10, h - th_text - 10),
+            "top-center": ((w - tw) // 2, 10),
+            "bottom-center": ((w - tw) // 2, h - th_text - 10),
+        }
         pos = positions.get(position, positions["center"])
         if bg_box:
+            box_fill = (*bg_box_color, alpha) if len(bg_box_color) == 3 else bg_box_color
             draw.rectangle(
-                [pos[0] - 2, pos[1] - 2, pos[0] + tw + 2, pos[1] + th + 2],
-                fill=bg_box_color
+                [pos[0] - 2, pos[1] - 2, pos[0] + tw + 2, pos[1] + th_text + 2],
+                fill=box_fill
             )
-        draw.text(pos, display_text, fill=color, font=font)
+        if outline_color and outline_width > 0:
+            _draw_text_with_outline(draw, pos, display_text, font,
+                                    fill_color, outline_fill, outline_width)
+        else:
+            draw.text(pos, display_text, fill=fill_color, font=font)
 
+    # Composite overlay onto base image
+    img = Image.alpha_composite(img, overlay)
+    img = img.convert("RGB")
     return _image_to_bytes(img)
 
 
