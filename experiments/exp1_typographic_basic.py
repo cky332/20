@@ -30,7 +30,7 @@ from config import (
     RESULTS_DATA_DIR, RESULTS_FIGURES_DIR, ASSETS_DIR,
     DATASET_DIR, EXP1_DIR, IMAGE_SIZE, OUTPUT_DIMS,
 )
-from src.embedding_client import GeminiEmbeddingClient
+from src.embedding_client import GeminiEmbeddingClient, QuotaExhaustedError
 from src.typographic_attack import (
     add_typographic_text, get_dominant_color,
 )
@@ -63,20 +63,36 @@ def _ensure_dirs():
 
 
 def _save_json(data, filename):
-    """Save data to JSON in the results/data directory."""
+    """Save data to JSON in the results/data directory.
+
+    Uses atomic write (write to temp file, then rename) to prevent
+    corruption if the process is interrupted during save.
+    """
     path = os.path.join(RESULTS_DATA_DIR, filename)
-    with open(path, "w") as f:
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2, default=_json_default)
+    os.replace(tmp_path, path)  # atomic on POSIX
     print(f"  Saved: {path}")
     return path
 
 
 def _load_json(filename):
-    """Load JSON from results/data directory, or return None if not found."""
+    """Load JSON from results/data directory, or return None if not found or corrupted."""
     path = os.path.join(RESULTS_DATA_DIR, filename)
     if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"  WARNING: Cache file corrupted: {path}")
+            print(f"    Error: {e}")
+            # Rename corrupted file so it's not lost but won't block progress
+            backup = path + ".corrupted"
+            os.rename(path, backup)
+            print(f"    Renamed to: {backup}")
+            print(f"    Will re-compute this phase from scratch.")
+            return None
     return None
 
 
@@ -399,34 +415,43 @@ def phase3_extract_embeddings(metadata, force=False):
           f"({len(existing_keys)} done, "
           f"{total_images - len(existing_keys)} remaining) ---")
 
-    for i, record in enumerate(metadata["images"]):
-        key = f"{record['image_id']}_{record['group']}"
+    try:
+        for i, record in enumerate(metadata["images"]):
+            key = f"{record['image_id']}_{record['group']}"
 
-        # Skip already-embedded images
-        if key in existing_keys:
-            skipped += 1
-            continue
+            # Skip already-embedded images
+            if key in existing_keys:
+                skipped += 1
+                continue
 
-        fpath = os.path.join(EXP1_DIR, record["filename"])
-        if not os.path.exists(fpath):
-            print(f"  WARNING: Image not found: {fpath}, skipping")
-            continue
-        with open(fpath, "rb") as f:
-            img_bytes = f.read()
+            fpath = os.path.join(EXP1_DIR, record["filename"])
+            if not os.path.exists(fpath):
+                print(f"  WARNING: Image not found: {fpath}, skipping")
+                continue
+            with open(fpath, "rb") as f:
+                img_bytes = f.read()
 
-        emb = client.embed_image(img_bytes, mime_type="image/jpeg")
-        results["image_embeddings"][key] = emb.tolist()
-        newly_embedded += 1
+            emb = client.embed_image(img_bytes, mime_type="image/jpeg")
+            results["image_embeddings"][key] = emb.tolist()
+            newly_embedded += 1
 
-        total_done = len(existing_keys) + newly_embedded
-        if newly_embedded % 10 == 0 or newly_embedded == 1:
-            print(f"  [{total_done}/{total_images}] "
-                  f"{record['group']}: {record['image_id']}")
+            total_done = len(existing_keys) + newly_embedded
+            if newly_embedded % 10 == 0 or newly_embedded == 1:
+                print(f"  [{total_done}/{total_images}] "
+                      f"{record['group']}: {record['image_id']}")
 
-        # Incremental save
-        if newly_embedded % save_interval == 0:
-            _save_json(results, cache_file)
-            print(f"  (checkpoint saved: {total_done}/{total_images})")
+            # Incremental save
+            if newly_embedded % save_interval == 0:
+                _save_json(results, cache_file)
+                print(f"  (checkpoint saved: {total_done}/{total_images})")
+
+    except QuotaExhaustedError as e:
+        # Save progress before exiting
+        _save_json(results, cache_file)
+        total_done = len(results["image_embeddings"])
+        print(f"\n  Progress saved: {total_done}/{total_images} image embeddings")
+        print(f"\n  {e}")
+        raise
 
     # Final save
     total_done = len(results["image_embeddings"])
@@ -1483,53 +1508,61 @@ if __name__ == "__main__":
                         help="Run only a specific phase (2-8)")
     args = parser.parse_args()
 
-    if args.phase == 0:
-        run(force=args.force)
-    else:
-        _ensure_dirs()
-        if args.phase == 2:
-            phase2_prepare_dataset(force=args.force)
-        elif args.phase == 3:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            if metadata:
-                phase3_extract_embeddings(metadata, force=args.force)
-            else:
-                print("ERROR: Run Phase 2 first")
-        elif args.phase == 4:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            embeddings = _load_json("exp1_phase3_embeddings.json")
-            if metadata and embeddings:
-                phase4_classification(metadata, embeddings, force=args.force)
-            else:
-                print("ERROR: Run Phases 2-3 first")
-        elif args.phase == 5:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            phase4_results = _load_json("exp1_phase4_metrics.json")
-            if metadata and phase4_results:
-                phase5_typography_ablation(metadata, phase4_results, force=args.force)
-            else:
-                print("ERROR: Run Phases 2-4 first")
-        elif args.phase == 6:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            if metadata:
-                phase6_dimension_truncation(metadata, force=args.force)
-            else:
-                print("ERROR: Run Phase 2 first")
-        elif args.phase == 7:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            if metadata:
-                phase7_clip_baseline(metadata, force=args.force)
-            else:
-                print("ERROR: Run Phase 2 first")
-        elif args.phase == 8:
-            metadata = _load_json("exp1_phase2_metadata.json")
-            embeddings = _load_json("exp1_phase3_embeddings.json")
-            phase4_results = _load_json("exp1_phase4_metrics.json")
-            phase5_results = _load_json("exp1_phase5_ablation.json")
-            phase6_results = _load_json("exp1_phase6_dimensions.json")
-            phase7_results = _load_json("exp1_phase7_clip.json")
-            if metadata and phase4_results:
-                phase8_visualize(metadata, phase4_results, phase5_results,
-                                 phase6_results, phase7_results, embeddings)
-            else:
-                print("ERROR: Run Phases 2-4 first (5-7 optional)")
+    try:
+        if args.phase == 0:
+            run(force=args.force)
+        else:
+            _ensure_dirs()
+            if args.phase == 2:
+                phase2_prepare_dataset(force=args.force)
+            elif args.phase == 3:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                if metadata:
+                    phase3_extract_embeddings(metadata, force=args.force)
+                else:
+                    print("ERROR: Run Phase 2 first")
+            elif args.phase == 4:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                embeddings = _load_json("exp1_phase3_embeddings.json")
+                if metadata and embeddings:
+                    phase4_classification(metadata, embeddings, force=args.force)
+                else:
+                    print("ERROR: Run Phases 2-3 first")
+            elif args.phase == 5:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                phase4_results = _load_json("exp1_phase4_metrics.json")
+                if metadata and phase4_results:
+                    phase5_typography_ablation(metadata, phase4_results, force=args.force)
+                else:
+                    print("ERROR: Run Phases 2-4 first")
+            elif args.phase == 6:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                if metadata:
+                    phase6_dimension_truncation(metadata, force=args.force)
+                else:
+                    print("ERROR: Run Phase 2 first")
+            elif args.phase == 7:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                if metadata:
+                    phase7_clip_baseline(metadata, force=args.force)
+                else:
+                    print("ERROR: Run Phase 2 first")
+            elif args.phase == 8:
+                metadata = _load_json("exp1_phase2_metadata.json")
+                embeddings = _load_json("exp1_phase3_embeddings.json")
+                phase4_results = _load_json("exp1_phase4_metrics.json")
+                phase5_results = _load_json("exp1_phase5_ablation.json")
+                phase6_results = _load_json("exp1_phase6_dimensions.json")
+                phase7_results = _load_json("exp1_phase7_clip.json")
+                if metadata and phase4_results:
+                    phase8_visualize(metadata, phase4_results, phase5_results,
+                                     phase6_results, phase7_results, embeddings)
+                else:
+                    print("ERROR: Run Phases 2-4 first (5-7 optional)")
+    except QuotaExhaustedError as e:
+        print(f"\n{'=' * 60}")
+        print("QUOTA EXHAUSTED - Progress has been saved")
+        print(f"{'=' * 60}")
+        print(f"\n{e}")
+        print("\nRe-run the same command to resume from where you left off.")
+        sys.exit(1)
