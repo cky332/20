@@ -63,20 +63,36 @@ def _ensure_dirs():
 
 
 def _save_json(data, filename):
-    """Save data to JSON in the results/data directory."""
+    """Save data to JSON in the results/data directory.
+
+    Uses atomic write (write to temp file, then rename) to prevent
+    corruption if the process is interrupted during save.
+    """
     path = os.path.join(RESULTS_DATA_DIR, filename)
-    with open(path, "w") as f:
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2, default=_json_default)
+    os.replace(tmp_path, path)  # atomic on POSIX
     print(f"  Saved: {path}")
     return path
 
 
 def _load_json(filename):
-    """Load JSON from results/data directory, or return None if not found."""
+    """Load JSON from results/data directory, or return None if not found or corrupted."""
     path = os.path.join(RESULTS_DATA_DIR, filename)
     if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"  WARNING: Cache file corrupted: {path}")
+            print(f"    Error: {e}")
+            # Rename corrupted file so it's not lost but won't block progress
+            backup = path + ".corrupted"
+            os.rename(path, backup)
+            print(f"    Renamed to: {backup}")
+            print(f"    Will re-compute this phase from scratch.")
+            return None
     return None
 
 
