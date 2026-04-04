@@ -950,80 +950,101 @@ def phase6_dimension_truncation(metadata, force=False):
     print("=" * 60)
 
     cache_file = "exp1_phase6_dimensions.json"
+    test_dims = [768, 1536, 3072]
+
+    # Load partial progress
+    partial = None
     if not force:
-        cached = _load_json(cache_file)
-        if cached:
-            print("  Phase 6 results loaded from cache.")
-            return cached
+        partial = _load_json(cache_file)
+        if partial and "metrics_per_dim" in partial:
+            done_dims = list(partial["metrics_per_dim"].keys())
+            if len(done_dims) >= len(test_dims):
+                print("  Phase 6 results loaded from cache.")
+                return partial
+            print(f"  Resuming Phase 6: dimensions {done_dims} already done")
 
     client = GeminiEmbeddingClient()
     pairings = metadata["pairings"]
-    test_dims = [768, 1536, 3072]
 
-    # We already have 3072 from Phase 3. Need 768 and 1536.
-    results = {"dimensions": test_dims, "metrics_per_dim": {}}
+    results = partial if partial else {"dimensions": test_dims, "metrics_per_dim": {}}
 
     for dim in test_dims:
+        if str(dim) in results["metrics_per_dim"]:
+            print(f"\n--- Dimension: {dim} (already done, skipping) ---")
+            continue
+
         print(f"\n--- Dimension: {dim} ---")
 
-        # Embed text (all categories, standard template)
-        text_vectors = {}
-        for cat in CATEGORIES:
-            text = PROMPT_TEMPLATES["standard"].format(category=cat)
-            emb = client.embed_text(text, output_dimensionality=dim)
-            text_vectors[cat] = emb
+        try:
+            # Embed text (all categories, standard template)
+            text_vectors = {}
+            for cat in CATEGORIES:
+                text = PROMPT_TEMPLATES["standard"].format(category=cat)
+                emb = client.embed_text(text, output_dimensionality=dim)
+                text_vectors[cat] = emb
 
-        # Embed images and classify
-        groups_to_test = ["baseline", "attack_random", "attack_neighbor",
-                          "attack_cross_domain"]
-        group_correct = {g: 0 for g in groups_to_test}
-        group_asr = {g: 0 for g in groups_to_test if g.startswith("attack_")}
-        group_count = {g: 0 for g in groups_to_test}
+            # Embed images and classify
+            groups_to_test = ["baseline", "attack_random", "attack_neighbor",
+                              "attack_cross_domain"]
+            group_correct = {g: 0 for g in groups_to_test}
+            group_asr = {g: 0 for g in groups_to_test if g.startswith("attack_")}
+            group_count = {g: 0 for g in groups_to_test}
 
-        for i, record in enumerate(metadata["images"]):
-            if record["group"] not in groups_to_test:
-                continue
+            for i, record in enumerate(metadata["images"]):
+                if record["group"] not in groups_to_test:
+                    continue
 
-            fpath = os.path.join(EXP1_DIR, record["filename"])
-            if not os.path.exists(fpath):
-                continue
-            with open(fpath, "rb") as f:
-                img_bytes = f.read()
+                fpath = os.path.join(EXP1_DIR, record["filename"])
+                if not os.path.exists(fpath):
+                    continue
+                with open(fpath, "rb") as f:
+                    img_bytes = f.read()
 
-            emb = client.embed_image(img_bytes, mime_type="image/jpeg",
-                                     output_dimensionality=dim)
+                emb = client.embed_image(img_bytes, mime_type="image/jpeg",
+                                         output_dimensionality=dim)
 
-            sims = {c: cosine_similarity(emb, text_vectors[c]) for c in CATEGORIES}
-            predicted = max(sims, key=sims.get)
+                sims = {c: cosine_similarity(emb, text_vectors[c]) for c in CATEGORIES}
+                predicted = max(sims, key=sims.get)
 
-            group = record["group"]
-            group_count[group] += 1
-            if predicted == record["category"]:
-                group_correct[group] += 1
+                group = record["group"]
+                group_count[group] += 1
+                if predicted == record["category"]:
+                    group_correct[group] += 1
 
-            if group.startswith("attack_"):
-                atk_type = group.replace("attack_", "")
-                atk_cat = pairings[record["category"]][atk_type]
-                if predicted == atk_cat:
-                    group_asr[group] += 1
+                if group.startswith("attack_"):
+                    atk_type = group.replace("attack_", "")
+                    atk_cat = pairings[record["category"]][atk_type]
+                    if predicted == atk_cat:
+                        group_asr[group] += 1
 
-            if (i + 1) % 100 == 0:
-                print(f"  [{i + 1}] processing at dim={dim}...")
+                if (i + 1) % 100 == 0:
+                    print(f"  [{i + 1}] processing at dim={dim}...")
 
-        dim_metrics = {}
-        for g in groups_to_test:
-            if group_count[g] > 0:
-                dim_metrics[g] = {
-                    "count": group_count[g],
-                    "accuracy": group_correct[g] / group_count[g],
-                }
-                if g in group_asr:
-                    dim_metrics[g]["asr"] = group_asr[g] / group_count[g]
+            dim_metrics = {}
+            for g in groups_to_test:
+                if group_count[g] > 0:
+                    dim_metrics[g] = {
+                        "count": group_count[g],
+                        "accuracy": group_correct[g] / group_count[g],
+                    }
+                    if g in group_asr:
+                        dim_metrics[g]["asr"] = group_asr[g] / group_count[g]
 
-        results["metrics_per_dim"][str(dim)] = dim_metrics
-        print(f"  dim={dim}: baseline_acc={dim_metrics.get('baseline', {}).get('accuracy', 'N/A')}")
-        for g in group_asr:
-            print(f"    {g}: ASR={dim_metrics.get(g, {}).get('asr', 'N/A')}")
+            results["metrics_per_dim"][str(dim)] = dim_metrics
+            print(f"  dim={dim}: baseline_acc="
+                  f"{dim_metrics.get('baseline', {}).get('accuracy', 'N/A')}")
+            for g in group_asr:
+                print(f"    {g}: ASR={dim_metrics.get(g, {}).get('asr', 'N/A')}")
+
+            # Save after each dimension
+            _save_json(results, cache_file)
+            print(f"  (dimension {dim} saved)")
+
+        except (QuotaExhaustedError, Exception) as e:
+            _save_json(results, cache_file)
+            done = list(results["metrics_per_dim"].keys())
+            print(f"\n  Phase 6 interrupted. Progress saved (dims {done} done).")
+            raise
 
     _save_json(results, cache_file)
     return results
