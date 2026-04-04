@@ -656,7 +656,9 @@ def phase4_classification(metadata, embeddings, force=False):
                     attack_sims.append(r["similarities"][tmpl][r["category"]])
 
             if len(baseline_sims) == len(attack_sims) and len(baseline_sims) > 1:
-                t_stat, p_val = paired_ttest(baseline_sims, attack_sims)
+                ttest_result = paired_ttest(baseline_sims, attack_sims)
+                t_stat = ttest_result["t_statistic"]
+                p_val = ttest_result["p_value"]
                 d = compute_cohens_d(baseline_sims, attack_sims)
                 ci = compute_confidence_interval(
                     [a - b for a, b in zip(attack_sims, baseline_sims)]
@@ -665,8 +667,8 @@ def phase4_classification(metadata, embeddings, force=False):
                     "t_statistic": t_stat,
                     "p_value": p_val,
                     "cohens_d": d,
-                    "ci_lower": ci[0] if ci else None,
-                    "ci_upper": ci[1] if ci else None,
+                    "ci_lower": ci.get("lower") if isinstance(ci, dict) else None,
+                    "ci_upper": ci.get("upper") if isinstance(ci, dict) else None,
                 }
                 print(f"  {tmpl}/{atk_type}: t={t_stat:.3f}, p={p_val:.4f}, d={d:.3f}")
 
