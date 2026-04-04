@@ -795,106 +795,131 @@ def phase5_typography_ablation(metadata, phase4_results, force=False):
     # Load base images for top5 categories
     dataset_images = load_dataset_images(DATASET_DIR)
 
-    ablation_results = {}
+    # Load partial progress if available
+    partial = _load_json(cache_file)
+    if partial and not force and "ablation_results" in partial:
+        ablation_results = partial["ablation_results"]
+        print(f"  Resuming ablation: {list(ablation_results.keys())} already done")
+    else:
+        ablation_results = {}
+
     total_api_calls = 0
 
     for factor_name, factor_config in ablation_factors.items():
+        # Skip already-completed factors
+        if factor_name in ablation_results:
+            print(f"\n--- Ablation factor: {factor_name} (already done, skipping) ---")
+            continue
+
         print(f"\n--- Ablation factor: {factor_name} ---")
         factor_results = {"levels": [], "asr_per_level": [], "accuracy_per_level": []}
 
-        if factor_name == "color":
-            levels = factor_config["levels"]
-        elif factor_name == "repetition":
-            levels = factor_config["levels"]
-        else:
-            levels = factor_config["levels"]
+        levels = factor_config["levels"]
 
-        for level_idx, level in enumerate(levels):
-            # Determine label
-            if factor_name == "color":
-                level_label = level["label"]
-            elif factor_name == "repetition":
-                level_label = level["label"]
-            elif "labels" in factor_config:
-                level_label = factor_config["labels"][level_idx]
-            else:
-                level_label = str(level)
+        try:
+            for level_idx, level in enumerate(levels):
+                # Determine label
+                if factor_name in ("color", "repetition"):
+                    level_label = level["label"]
+                elif "labels" in factor_config:
+                    level_label = factor_config["labels"][level_idx]
+                else:
+                    level_label = str(level)
 
-            print(f"  Level: {level_label}")
-            correct_count = 0
-            asr_count = 0
-            total_count = 0
+                print(f"  Level: {level_label}")
+                correct_count = 0
+                asr_count = 0
+                total_count = 0
 
-            for cat in top5_cats:
-                cat_images = dataset_images.get(cat, [])
-                if not cat_images:
-                    continue
-                atk_text = pairings[cat]["neighbor"]
-                atk_cat = SEMANTIC_NEIGHBORS[cat]
+                for cat in top5_cats:
+                    cat_images = dataset_images.get(cat, [])
+                    if not cat_images:
+                        continue
+                    atk_text = pairings[cat]["neighbor"]
+                    atk_cat = SEMANTIC_NEIGHBORS[cat]
 
-                for img_id, img_bytes in cat_images:
-                    # Build attack params for this level
-                    params = {
-                        "font_size_pct": 0.10,
-                        "position": "center",
-                        "color": (255, 255, 255),
-                        "outline_color": (0, 0, 0),
-                        "outline_width": 2,
-                        "opacity": 1.0,
-                        "repeat": 1,
-                    }
+                    for img_id, img_bytes in cat_images:
+                        # Build attack params for this level
+                        params = {
+                            "font_size_pct": 0.10,
+                            "position": "center",
+                            "color": (255, 255, 255),
+                            "outline_color": (0, 0, 0),
+                            "outline_width": 2,
+                            "opacity": 1.0,
+                            "repeat": 1,
+                        }
 
-                    if factor_name == "font_size":
-                        params["font_size_pct"] = level
-                    elif factor_name == "position":
-                        params["position"] = level
-                    elif factor_name == "color":
-                        if level["color"] == "dominant":
-                            params["color"] = get_dominant_color(img_bytes)
-                        else:
-                            params["color"] = level["color"]
-                        params["outline_color"] = level["outline_color"]
-                        params["outline_width"] = level["outline_width"]
-                    elif factor_name == "opacity":
-                        params["opacity"] = level
-                    elif factor_name == "repetition":
-                        params["repeat"] = level["repeat"]
-                        params["position"] = level["position"]
+                        if factor_name == "font_size":
+                            params["font_size_pct"] = level
+                        elif factor_name == "position":
+                            params["position"] = level
+                        elif factor_name == "color":
+                            if level["color"] == "dominant":
+                                params["color"] = get_dominant_color(img_bytes)
+                            else:
+                                params["color"] = level["color"]
+                            params["outline_color"] = level["outline_color"]
+                            params["outline_width"] = level["outline_width"]
+                        elif factor_name == "opacity":
+                            params["opacity"] = level
+                        elif factor_name == "repetition":
+                            params["repeat"] = level["repeat"]
+                            params["position"] = level["position"]
 
-                    # Generate attacked image
-                    atk_bytes = add_typographic_text(
-                        img_bytes, atk_text,
-                        font_size_pct=params["font_size_pct"],
-                        position=params["position"],
-                        color=params["color"],
-                        outline_color=params["outline_color"],
-                        outline_width=params["outline_width"],
-                        opacity=params["opacity"],
-                        repeat=params["repeat"],
-                    )
+                        # Generate attacked image
+                        atk_bytes = add_typographic_text(
+                            img_bytes, atk_text,
+                            font_size_pct=params["font_size_pct"],
+                            position=params["position"],
+                            color=params["color"],
+                            outline_color=params["outline_color"],
+                            outline_width=params["outline_width"],
+                            opacity=params["opacity"],
+                            repeat=params["repeat"],
+                        )
 
-                    # Embed and classify
-                    emb = client.embed_image(atk_bytes, mime_type="image/jpeg")
-                    total_api_calls += 1
+                        # Embed and classify
+                        emb = client.embed_image(atk_bytes, mime_type="image/jpeg")
+                        total_api_calls += 1
 
-                    sims = {c: cosine_similarity(emb, text_vectors[c]) for c in CATEGORIES}
-                    predicted = max(sims, key=sims.get)
+                        sims = {c: cosine_similarity(emb, text_vectors[c]) for c in CATEGORIES}
+                        predicted = max(sims, key=sims.get)
 
-                    if predicted == cat:
-                        correct_count += 1
-                    if predicted == atk_cat:
-                        asr_count += 1
-                    total_count += 1
+                        if predicted == cat:
+                            correct_count += 1
+                        if predicted == atk_cat:
+                            asr_count += 1
+                        total_count += 1
 
-            accuracy = correct_count / total_count if total_count > 0 else 0
-            asr = asr_count / total_count if total_count > 0 else 0
+                accuracy = correct_count / total_count if total_count > 0 else 0
+                asr = asr_count / total_count if total_count > 0 else 0
 
-            factor_results["levels"].append(level_label)
-            factor_results["asr_per_level"].append(asr)
-            factor_results["accuracy_per_level"].append(accuracy)
-            print(f"    count={total_count}, accuracy={accuracy:.3f}, ASR={asr:.3f}")
+                factor_results["levels"].append(level_label)
+                factor_results["asr_per_level"].append(asr)
+                factor_results["accuracy_per_level"].append(accuracy)
+                print(f"    count={total_count}, accuracy={accuracy:.3f}, ASR={asr:.3f}")
+
+        except (QuotaExhaustedError, Exception) as e:
+            # Save partial progress for this factor and all completed factors
+            if factor_results["levels"]:
+                ablation_results[factor_name + "_partial"] = factor_results
+            _save_json({
+                "top5_categories": top5_cats,
+                "ablation_results": ablation_results,
+            }, cache_file)
+            print(f"\n  Phase 5 interrupted. Progress saved "
+                  f"({len(ablation_results)} factors done).")
+            raise
 
         ablation_results[factor_name] = factor_results
+
+        # Save after each completed factor
+        _save_json({
+            "top5_categories": top5_cats,
+            "ablation_results": ablation_results,
+        }, cache_file)
+        print(f"  (factor '{factor_name}' saved)")
 
     print(f"\n  Total API calls for ablation: {total_api_calls}")
 
