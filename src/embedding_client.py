@@ -98,7 +98,8 @@ class GeminiEmbeddingClient:
             )
         quota_retries = 0
         max_quota_retries = 3  # only retry quota errors a few times
-        for attempt in range(MAX_RETRIES + max_quota_retries):
+        max_attempts = MAX_RETRIES + max_quota_retries + 3  # extra for network errors
+        for attempt in range(max_attempts):
             try:
                 self._rate_limit()
                 result = self.client.models.embed_content(
@@ -139,10 +140,17 @@ class GeminiEmbeddingClient:
                     time.sleep(wait_time)
                     continue
 
-                if attempt >= MAX_RETRIES - 1:
+                # Connection errors get more retries with longer waits
+                is_connection = ("Connect" in err_str or "refused" in err_str
+                                 or "reset" in err_str or "unreachable" in err_str)
+                max_for_type = max_attempts if is_connection else MAX_RETRIES
+                if attempt >= max_for_type - 1:
                     raise
-                wait_time = 2 ** (attempt + 1)
-                print(f"  API call failed (attempt {attempt + 1}): {e}")
+                wait_time = min(2 ** (attempt + 1), 60)
+                if is_connection:
+                    wait_time = min(15 * (attempt + 1), 120)
+                print(f"  API call failed (attempt {attempt + 1}/{max_for_type}): "
+                      f"{type(e).__name__}: {str(e)[:100]}")
                 print(f"  Retrying in {wait_time}s...")
                 time.sleep(wait_time)
 
